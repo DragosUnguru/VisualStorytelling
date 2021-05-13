@@ -3,6 +3,8 @@ import shutil
 import json
 import tensorflow as tf
 
+from PIL import Image
+
 train_jsons_dir_path = '.\\data\\train'
 dev_jsons_dir_path = '.\\data\\dev'
 test_jsons_dir_path = '.\\data\\test'
@@ -17,7 +19,7 @@ train_files_prefix = os.path.join(tfrecords_dir, "train")
 valid_files_prefix = os.path.join(tfrecords_dir, "valid")
 test_files_prefix = os.path.join(tfrecords_dir, "test")
 
-VIST_base_dir = os.path.join(os.getcwd(), 'data\\VIST')
+VIST_base_dir = 'C:\\Users\\ungur\\Desktop\\licentaV2\\data\\VIST'
 
 images_per_story = 5
 
@@ -75,14 +77,6 @@ def create_entry(story_data, img_dir_path):
         "raw_image_2": bytes_feature(tf.io.read_file(images_paths[2]).numpy()),
         "raw_image_3": bytes_feature(tf.io.read_file(images_paths[3]).numpy()),
         "raw_image_4": bytes_feature(tf.io.read_file(images_paths[4]).numpy()),
-        # "image": bytes_feature(
-        #     tf.image.resize(
-        #         tf.image.decode_jpeg(
-        #             tf.io.read_file(image_path).numpy(),
-        #             channels=3),
-        #         size=(299, 299)
-        #     ).numpy().tobytes()
-        # )
     }
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
@@ -98,14 +92,13 @@ def write_data(data_to_dump, tfrecord_index, img_dir_path, image_set):
 
     with tf.io.TFRecordWriter(tfrecord_file_name) as writer:
         for story_data in data_to_dump:
-            if len(story_data) != images_per_story:
-                continue
-
-            entry = create_entry(story_data, img_dir_path)
-            writer.write(entry.SerializeToString())
+            if len(story_data) == images_per_story:
+                entry = create_entry(story_data, img_dir_path)
+                writer.write(entry.SerializeToString())
 
 
 def read_example(example):
+    # zeros = tf.as_string(tf.zeros([299, 299, 3], dtype=tf.uint8))
     feature_description = {
         "caption_0": tf.io.FixedLenFeature([], tf.string, ""),
         "caption_1": tf.io.FixedLenFeature([], tf.string, ""),
@@ -125,13 +118,10 @@ def read_example(example):
     # Pop images from feature and resize them
     for photo_order in range(images_per_story):
         raw_image = features.pop("raw_image_" + str(photo_order))
-        # whole_caption = features.pop("caption_" + str(photo_order))
-        #
-        # features["caption_" + str(photo_order)] = tf.strings.split(whole_caption)
-
         features["image_" + str(photo_order)] = tf.image.resize(
             tf.image.decode_jpeg(raw_image, channels=3), size=(299, 299)
         )
+
     return features
 
 
@@ -190,6 +180,29 @@ def normalize_story_json(image_set='train'):
         json.dump(list(stories.values()), fp)
 
 
+def is_img_valid(path_to_img):
+    if os.path.isfile(path_to_img):
+        # File exists. Check if it's corrupted
+        try:
+            img = Image.open(path_to_img)
+            img.verify()
+            img = Image.open(path_to_img)
+            img.getdata()[0]
+
+            # Verification passed. Check format before adding entry
+            if img.format == 'JPEG':
+                return True
+
+            else:
+                # print('[X] Wrong format for image. Skipping...')
+                return False
+        except Exception:
+            # print('[X] Corrupted image. Skipping...')
+            return False
+
+    return False
+
+
 def manage_data_VIST(image_set='train'):
     working_dir = os.path.join(VIST_base_dir, image_set)
     archive_target_dir = os.path.join(working_dir, 'images')
@@ -205,7 +218,7 @@ def manage_data_VIST(image_set='train'):
     else:
         images_dir = os.path.join(archive_target_dir, image_set)
 
-    split = 2  # tar archive index
+    split = 1  # tar archive index
     for tar_url in images_tars:
         if is_dir_empty(archive_target_dir):
             # Download archive
@@ -227,7 +240,7 @@ def manage_data_VIST(image_set='train'):
 
         # (Temporary) solution as I train on the first archive. Therefore, for dev set consider just the first 300 images
         COUNT_FIRST_N_STORIES = 0
-        FIRST_N_STORIES = 700
+        FIRST_N_STORIES = 750
 
         for story in data:
             story_data = []
@@ -236,10 +249,10 @@ def manage_data_VIST(image_set='train'):
                 curr_img = story['photos'][photo_idx]
                 image_path = os.path.join(images_dir, curr_img['id'] + '.jpg')
 
-                if os.path.isfile(image_path):
+                if is_img_valid(image_path):
                     photo_data = {
                         'id': curr_img['id'],
-                        'caption': curr_img['caption'],
+                        'caption': curr_img['caption']
                     }
                     story_data.append(photo_data)
 
@@ -257,4 +270,4 @@ def manage_data_VIST(image_set='train'):
         # shutil.rmtree(archive_target_dir)
 
 
-# manage_data_VIST('train')
+# manage_data_VIST('dev')

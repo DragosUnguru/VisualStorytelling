@@ -1,7 +1,12 @@
 import os
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"   # see issue #152
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+import decoders
+import text_encoders
+import vision_encoders
+
+os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
 
 import custom_model
 import tensorflow as tf
@@ -9,9 +14,6 @@ import tensorflow.keras as keras
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-import decoders
-import text_encoders
-import vision_encoders
 from data_prep import get_dataset
 from vocabulary_builder import retrieve_tokenizer
 
@@ -19,73 +21,86 @@ from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping
 
 train_tfrecords_dir = os.path.join(os.getcwd(), 'data\\VIST\\train\\tfrecords')
 dev_tfrecords_dir = os.path.join(os.getcwd(), 'data\\VIST\\dev\\tfrecords')
-checkpoint_dir = 'C:\\Users\\ungur\\Desktop\\licentaV2\\weights'
-best_model_path = os.path.join(checkpoint_dir, 'best_model')
 
-num_epochs = 4
-batch_size = 8
+weights_dir = 'C:\\Users\\ungur\\Desktop\\licentaV2\\weights'
+checkpoints_dir = os.path.join(weights_dir, 'checkpoints')
+
+vision_model_path = os.path.join(weights_dir, 'vision_model')
+vision_model_weights = os.path.join(weights_dir, 'vision_model_weights')
+
+custom_model_checkpoint_weights = os.path.join(checkpoints_dir, 'ckpted_custom_model_weights')
+
+decoder_model_path = os.path.join(weights_dir, 'decoder_model')
+decoder_model_weights = os.path.join(weights_dir, 'decoder_model_weights')
+
+
+num_epochs = 5
+batch_size = 4
 
 caption_len = 25
-
-prev_sentence_encoder_LSTM_size = 256
-image_encoder_output_size = 4096
-
-pre_att_LSTM_size = 64
-post_att_LSTM_size = 32
-
-image_encoder_lstm_size = 256
-bi_lstm_size = 256
+images_per_story = 5
+image_encoder_lstm_size = bi_lstm_size = 256
 
 
-def __make_model():
-    tokenizer = retrieve_tokenizer()
-    words_to_idx = tokenizer.word_index
-    vocab_size = len(words_to_idx) + 1
-
-    text_encoder = text_encoders.get_embedding_layer(caption_len, words_to_idx)
-    vision_encoder = vision_encoders.get_xception_encoder()
-    decoder = decoders.get_decoder_bilstm(
-        photos_per_story=5,
-        words_per_caption=caption_len,
-        input_features_len=image_encoder_lstm_size,
-        lstm_size=image_encoder_lstm_size,
-        vocab_size=vocab_size
-    )
-
-    my_mare_model = custom_model.DecoderModel(
-        text_encoder=text_encoder,
+def __make_model(text_encoder, vision_encoder, decoder, words_to_idx):
+    my_custom_model = custom_model.CustomModel(
         vision_encoder=vision_encoder,
+        text_encoder=text_encoder,
         decoder=decoder,
         words_to_idx=words_to_idx,
-        idx_to_word=tokenizer.index_word,
         words_per_caption=caption_len,
-        image_encoder_lstm_size=image_encoder_lstm_size
+    )
+    my_custom_model.compile(
+        optimizer=keras.optimizers.Adam()
     )
 
-    my_mare_model.compile(
-        optimizer=tf.optimizers.Adam()
-    )
-
-    return my_mare_model
+    return my_custom_model
 
 
 def make_or_restore_model():
-    # Either restore the best model saved from early stopping callback,
-    # either the latest model saved via checkpointing,
-    # or create a fresh one if there is no checkpoint available.
-    if os.path.isfile(best_model_path):
-        print('Restored best model saved from EalyStopping callback')
-        return keras.models.load_model(best_model_path)
+    tokenizer = retrieve_tokenizer()
+    words_to_idx = tokenizer.word_index
 
-    checkpoints = [os.path.join(checkpoint_dir, '\\' + name)
-                   for name in os.listdir(checkpoint_dir)]
-    if checkpoints:
-        latest_checkpoint = max(checkpoints, key=os.path.getctime)
-        print('Restoring from', latest_checkpoint)
-        return keras.models.load_model(latest_checkpoint)
+    text_encoder = text_encoders.get_embedding_layer(caption_len, words_to_idx)
 
-    print('Creating a new model')
-    return __make_model()
+    if os.path.isfile(vision_model_path) and os.path.isfile(decoder_model_path):
+        print('Restored model that was explicitly saved!')
+        vision_encoder = keras.models.load_model(vision_model_path)
+        decoder_model = keras.models.load_model(decoder_model_path)
+    else:
+        print('Created new untrained model.')
+        vision_encoder = vision_encoders.get_xception_encoder(images_per_story, image_encoder_lstm_size)
+        decoder_model = decoders.get_decoder_bilstm(images_per_story, caption_len, image_encoder_lstm_size, bi_lstm_size, len(words_to_idx) + 1)
+
+    return __make_model(text_encoder, vision_encoder, decoder_model, words_to_idx)
+
+
+def predict_on_dev(model):
+    dev_dataset = get_dataset(os.path.join(dev_tfrecords_dir, "dev-*.tfrecord"), batch_size)
+    dev_batch = dev_dataset.take(2)
+
+    expected_text_indices, got_text_softmax = model.predict(
+        dev_batch,
+        batch_size=2
+    )
+
+    got_text_softmax = tf.argmax(got_text_softmax, axis=-1).numpy()
+    tokenizer = retrieve_tokenizer()
+
+    for story in got_text_softmax:
+        print('======== Predictions story ========')
+        counter = 0
+        for image in story:
+            caption = tokenizer.sequences_to_texts(image)
+            print('Predicted captions for image ' + str(counter) + ': ' + caption)
+            counter += 1
+
+
+def evaluate_on_dev(model):
+    dev_dataset = get_dataset(os.path.join(dev_tfrecords_dir, "dev-*.tfrecord"), batch_size)
+
+    loss, acc = model.evaluate(dev_dataset, verbose=2)
+    print("Untrained model, accuracy: {:5.2f}%".format(100 * acc))
 
 
 def train_model():
@@ -103,24 +118,21 @@ def train_model():
         monitor="val_loss", patience=2, restore_best_weights=True
     )
 
-    # Create checkpointing callback
-    checkpoint = keras.callbacks.ModelCheckpoint(
-        filepath=os.path.join(checkpoint_dir, '\\ckpted_model'),
-        save_freq=500
-    )
-
     history = model.fit(
         train_dataset,
         epochs=num_epochs,
         validation_data=dev_dataset,
-        batch_size=batch_size,
-        callbacks=[reduce_lr, early_stopping, checkpoint]
+        callbacks=[reduce_lr, early_stopping]
     )
 
-    model.save_weights(os.path.join(checkpoint_dir, 'model_weights.h5'))
-    model.decoder.save_weights(os.path.join(checkpoint_dir, 'decoder_model_weights.h5'))
-    model.save(best_model_path)
+    # Save model
+    model.decoder.save_weights(decoder_model_weights, save_format='tf')
+    model.vision_encoder.save_weights(vision_model_weights, save_format='tf')
 
+    model.decoder.save(decoder_model_path)
+    model.vision_encoder.save(vision_model_path)
+
+    # Plot loss
     plt.plot(history.history["loss"])
     plt.plot(history.history["val_loss"])
     plt.ylabel("Loss")
@@ -129,5 +141,5 @@ def train_model():
     plt.show()
 
 
-tf.keras.backend.clear_session()
+keras.backend.clear_session()
 train_model()

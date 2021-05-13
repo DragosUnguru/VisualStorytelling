@@ -1,4 +1,4 @@
-import tensorflow as tf
+import slicer_layer
 from tensorflow.keras.layers import Dense, LSTM, Input, Bidirectional, RepeatVector, Concatenate, Activation, Dot, TimeDistributed, Masking, Layer, Reshape
 from tensorflow.keras.backend import variable
 from tensorflow.keras.activations import softmax
@@ -101,17 +101,6 @@ def get_decoder_model_with_attention(
     return model
 
 
-class TimestepSliceLayer(Layer):
-    def __init__(self):
-        super(TimestepSliceLayer, self).__init__()
-
-    def call(self, inputs, **kwargs):
-        return tf.unstack(inputs, axis=1)
-
-    def get_config(self):
-        return super().get_config()
-
-
 def get_decoder_bilstm(
         photos_per_story, words_per_caption, input_features_len, lstm_size, vocab_size
 ):
@@ -132,7 +121,7 @@ def get_decoder_bilstm(
     previous_lstm_cell = None
 
     # Unstack to list of (None, input_features_len) slices
-    listed_tensors = TimestepSliceLayer()(x_in)
+    listed_tensors = slicer_layer.TimestepSliceLayer()(x_in)
 
     for photo_tensor in listed_tensors:
         # Create num_words_per_caption sequences => tensors of shape (None, words_per_caption, input_features_len)
@@ -148,7 +137,6 @@ def get_decoder_bilstm(
             x = bi_lstm(seq_photo_tensor)
 
         # Second layer LSTM
-        x = Masking(mask_value=0.0)(x)
         lstm_out_seq, previous_lstm_output, previous_lstm_cell = lstm(x)
 
         # Softmax output layer

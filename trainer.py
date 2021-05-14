@@ -38,7 +38,7 @@ decoder_model_path = os.path.join(weights_dir, 'decoder_model')
 decoder_model_weights = os.path.join(weights_dir, 'decoder_model_weights')
 
 
-num_epochs = 1
+num_epochs = 30
 batch_size = 2
 
 caption_len = 25
@@ -117,12 +117,12 @@ def train_model():
 
     # Create a learning rate scheduler callback
     reduce_lr = ReduceLROnPlateau(
-        monitor="val_loss", factor=0.2, patience=1
+        monitor="val_loss", factor=0.2, patience=2
     )
 
     # Create an early stopping callback
     early_stopping = EarlyStopping(
-        monitor="val_loss", patience=2, restore_best_weights=True
+        monitor="val_loss", patience=5, restore_best_weights=True
     )
 
     history = model.fit(
@@ -149,7 +149,8 @@ def train_model():
     plt.legend(["train", "valid"], loc="upper right")
     plt.show()
 
+    print(model.summary())
 
-tf.keras.backend.clear_session()
+
 train_model()
 # predict_on_dev()

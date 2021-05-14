@@ -86,7 +86,8 @@ def glove_embedding_encoder(words_per_caption, words_to_idx, lstm_size):
     inputs = Input(shape=(photos_per_story, words_per_caption), name="text_input")
 
     # Use GloVe embeddings => (None, 5, words_per_caption, 300)
-    glove_embeddings = TimeDistributed(get_embedding_layer(words_per_caption, words_to_idx))(inputs)
+    embedding_layer = get_embedding_layer(words_per_caption, words_to_idx)
+    glove_embeddings = TimeDistributed(embedding_layer)(inputs)
 
     # Flatten to (None, words_per_caption * 5, 300)
     lstm_input = Reshape((words_per_caption * photos_per_story, 300), input_shape=(5, words_per_caption, 300))(glove_embeddings)

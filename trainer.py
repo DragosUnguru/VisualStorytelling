@@ -117,7 +117,7 @@ def train_model():
 
     # Create a learning rate scheduler callback
     reduce_lr = ReduceLROnPlateau(
-        monitor="val_loss", factor=0.2, patience=2
+        monitor="val_loss", factor=0.2, patience=3
     )
 
     # Create an early stopping callback
@@ -152,5 +152,6 @@ def train_model():
     print(model.summary())
 
 
+tf.keras.backend.clear_session()
 train_model()
 # predict_on_dev()

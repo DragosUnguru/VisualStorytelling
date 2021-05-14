@@ -3,7 +3,10 @@ import tensorflow as tf
 import tensorflow_hub as hub
 
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, Embedding
+from tensorflow.keras.layers import Input, Embedding, Reshape, LSTM, TimeDistributed
+
+
+photos_per_story = 5
 
 
 def get_embedding_layer(sentence_len, words_to_idx):
@@ -74,24 +77,22 @@ def bert_text_encoder():
     return Model(inputs, embeddings, name="text_encoder")
 
 
-def glove_embedding_encoder(sentence_len, words_to_idx, output_units):
-    # Receive inputs as string representing a sentence
-    inputs = Input(shape=(), dtype=tf.string, name="text_input")
+def manhattan_distance(A, B):
+    return tf.keras.sum(tf.keras.abs(A - B), axis=1, keepdims=True)
 
-    # Vectorize sentence to word tokens based on given dictionary
-    vectorized_input = tf.keras.layers.experimental.preprocessing.TextVectorization(
-        max_tokens=None,                        # Exclude <OOV> and the reserved 0 as the output_mode = 'int'
-        standardize=None,                       # Input is already standardized
-        output_mode='int',
-        output_sequence_length=sentence_len,
-        vocabulary=list(words_to_idx.keys())    # Exclude <OOV> token as it is automatically added
-    )(inputs)
 
-    # Use GloVe embeddings to encode every word before running LSTM
-    embeddings = get_embedding_layer(sentence_len, words_to_idx)(vectorized_input)
+def glove_embedding_encoder(words_per_caption, words_to_idx, lstm_size):
+    # Receive inputs of shape (None, 5, words_per_caption)
+    inputs = Input(shape=(photos_per_story, words_per_caption), name="text_input")
 
-    # LSTM cell for every word (time step) representing the encoded sentence
-    # output = LSTM(output_units)(embeddings)
+    # Use GloVe embeddings => (None, 5, words_per_caption, 300)
+    glove_embeddings = TimeDistributed(get_embedding_layer(words_per_caption, words_to_idx))(inputs)
+
+    # Flatten to (None, words_per_caption * 5, 300)
+    lstm_input = Reshape((words_per_caption * photos_per_story, 300), input_shape=(5, words_per_caption, 300))(glove_embeddings)
+
+    # LSTM cell returns size (None, words_per_caption * 5, lstm_size)
+    encoding = LSTM(lstm_size, return_sequences=True)(lstm_input)
 
     # Create the text encoder model
-    return Model(inputs, embeddings, name="text_encoder")
+    return Model(inputs, encoding, name="text_encoder")

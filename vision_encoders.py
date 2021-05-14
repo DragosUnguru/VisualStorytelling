@@ -19,26 +19,24 @@ def get_xception_encoder(images_per_story, image_encoder_lstm_size):
 
     inputs = Input(shape=(images_per_story, 299, 299, 3), name="images_input")
 
-    reshaper = Reshape(target_shape=(1, 299, 299, 3))
+    reshaper = Reshape(target_shape=(1, xception.layers[-1].output_shape[-1]))
     concatenator = Concatenate(axis=1)
-    preprocessed_photos_to_concat = []
+    image_embeddings_to_concat = []
 
     # Receive the images as inputs and slice on time axis
     seq_input = slicer_layer.TimestepSliceLayer()(inputs)
 
     for photo in seq_input:
-        # Preprocess the input image one by one and reassemble later
+        # Apply xception model on each photo
         preprocessed_photo = preprocess_input(tf.cast(photo, tf.float32))
-        preprocessed_photo = reshaper(preprocessed_photo)
-        preprocessed_photos_to_concat.append(preprocessed_photo)
+        xception_output = xception(preprocessed_photo)
+        reshaped_xception = reshaper(xception_output)
+        image_embeddings_to_concat.append(reshaped_xception)
 
-    xception_input = concatenator(preprocessed_photos_to_concat)
-
-    # Generate the embeddings for the images using the xception model
-    embeddings = TimeDistributed(xception)(xception_input)
+    lstm_input = concatenator(image_embeddings_to_concat)
 
     # Apply LSTM encoding, get a output of size (None, images_per_story, image_encoder_lstm_size)
-    outputs = LSTM(image_encoder_lstm_size, return_sequences=True)(embeddings)
+    outputs = LSTM(image_encoder_lstm_size, return_sequences=True)(lstm_input)
 
     # Create the vision encoder model
     return Model(inputs, outputs, name="vision_encoder")

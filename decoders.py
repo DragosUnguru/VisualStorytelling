@@ -1,4 +1,6 @@
 import slicer_layer
+import tensorflow as tf
+
 from tensorflow.keras.layers import Dense, LSTM, Input, Bidirectional, RepeatVector, Concatenate, Activation, Dot, TimeDistributed, Masking, Layer, Reshape
 from tensorflow.keras.backend import variable
 from tensorflow.keras.activations import softmax
@@ -105,6 +107,7 @@ def get_decoder_bilstm(
         photos_per_story, words_per_caption, input_features_len, lstm_size, vocab_size
 ):
 
+    # Input (None, 5, input_features_len)
     x_in = Input(shape=(photos_per_story, input_features_len))
     final_story_softmax_activations = []
 
@@ -114,7 +117,7 @@ def get_decoder_bilstm(
 
     # Misc for creating story sequence for each photo
     reshaper = Reshape(target_shape=(1, words_per_caption, vocab_size))
-    concatenator = Concatenate(axis=-3)
+    concatenator = Concatenate(axis=1)
 
     # No initial state for first tensor
     previous_lstm_output = None
@@ -126,24 +129,26 @@ def get_decoder_bilstm(
     for photo_tensor in listed_tensors:
         # Create num_words_per_caption sequences => tensors of shape (None, words_per_caption, input_features_len)
         seq_photo_tensor = RepeatVector(words_per_caption)(photo_tensor)
-        seq_photo_tensor = Masking(mask_value=0.0)(seq_photo_tensor)
 
         if previous_lstm_output is not None and previous_lstm_cell is not None:
             # First layer Bi-LSTM with initial state from previous run on slice
-            # zeros = tf.zeros_like(previous_lstm_output)
-            x = bi_lstm(seq_photo_tensor, initial_state=[previous_lstm_output, previous_lstm_cell, previous_lstm_output, previous_lstm_cell])
+            initial_state = [previous_lstm_output, previous_lstm_cell, previous_lstm_output, previous_lstm_cell]
         else:
             # Zeros as initial state
-            x = bi_lstm(seq_photo_tensor)
+            initial_state = None
+
+        # First layer Bi-LSTM
+        x = bi_lstm(seq_photo_tensor, initial_state=initial_state)
 
         # Second layer LSTM
         lstm_out_seq, previous_lstm_output, previous_lstm_cell = lstm(x)
 
-        # Softmax output layer
+        # Softmax output layer => (None, words_per_caption, vocab_size)
         softmax_activations = TimeDistributed(Dense(vocab_size, activation='softmax'))(lstm_out_seq)
         softmax_activations = reshaper(softmax_activations)
         final_story_softmax_activations.append(softmax_activations)
 
+    # (None, 5, words_per_caption, vocab_size)
     outputs = concatenator(final_story_softmax_activations)
 
     # Step 3: Create model instance taking three inputs and returning the list of outputs

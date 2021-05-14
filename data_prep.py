@@ -125,6 +125,18 @@ def read_example(example):
     return features
 
 
+def split_tfrecord(shards, image_set='dev'):
+    current_tfrecords_dir = os.path.join(VIST_base_dir, image_set + '\\tfrecords')
+    tf_record_to_split = os.path.join(current_tfrecords_dir, 'dev-1.tfrecord')
+
+    raw_dataset = tf.data.TFRecordDataset(tf_record_to_split)
+
+    for i in range(shards):
+        shard_name = os.path.join(current_tfrecords_dir, f"\\shard-part-{i}.tfrecord")
+        writer = tf.data.experimental.TFRecordWriter(shard_name)
+        writer.write(raw_dataset.shard(shards, i))
+
+
 def get_dataset(file_pattern, batch_size):
     return (
         tf.data.TFRecordDataset(tf.data.Dataset.list_files(file_pattern))
